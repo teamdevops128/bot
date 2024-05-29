@@ -1,0 +1,42 @@
+trigger:
+- main
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+- script: |
+    #!/bin/bash
+      curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+  displayName: 'install trivy'
+  
+- script: |
+    #!/bin/bash
+
+    JSON_FILE="dependabot_alerts.json"
+    OUTPUT_CSV="dependabot_alerts.csv"
+    if ! command -v jq &> /dev/null
+    then
+        echo "jq could not be found, please install jq to continue."
+        exit 1
+    fi
+
+    echo "number,CVE_ID,url,repo_name" > "$OUTPUT_CSV"
+
+    # Extract required data and append to the CSV file
+    jq -r '.[] | [
+        .number,
+        (.security_advisory.identifiers[] | select(.type == "CVE") | .value),
+        .html_url,
+        (.html_url | split("/") | .[4])
+    ] | @csv' "$JSON_FILE" >> "$OUTPUT_CSV"
+
+    echo "Dependabot alerts have been written to $OUTPUT_CSV"
+
+  
+- task: PublishPipelineArtifact@1
+  inputs:
+    targetPath: '$(System.DefaultWorkingDirectory)/dependabot_alerts.csv'
+    artifact: 'myArtifacts'
+    publishLocation: pipeline
+  displayName: 'Publish Artifacts'
