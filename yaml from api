@@ -1,0 +1,44 @@
+#!/bin/bash
+
+ORG_NAME="nj"
+TOKEN="your_github_token"  # Replace this with your GitHub token
+
+# Output CSV file
+OUTPUT_CSV="dependabot_alerts.csv"
+
+# Check if jq is installed
+if ! command -v jq &> /dev/null
+then
+    echo "jq could not be found, please install jq to continue."
+    exit 1
+fi
+
+# Initialize the CSV file with the header
+echo "number,CVE_ID,url,repo_name" > "$OUTPUT_CSV"
+
+# Function to fetch data from the GitHub API
+fetch_data() {
+  local url=$1
+  curl -s -H "Authorization: token $TOKEN" -H "Accept: application/vnd.github+json" "$url"
+}
+
+# Fetch the list of repositories from the organization
+REPOS=$(fetch_data "https://api.github.com/orgs/${ORG_NAME}/repos" | jq -r '.[].name')
+
+# Loop through each repository and fetch Dependabot alerts
+for REPO in $REPOS; do
+  ALERTS=$(fetch_data "https://api.github.com/repos/${ORG_NAME}/${REPO}/dependabot/alerts")
+  
+  # Check if there are alerts
+  if [[ $(echo "$ALERTS" | jq '. | length') -gt 0 ]]; then
+    # Extract required data and append to the CSV file
+    echo "$ALERTS" | jq -r --arg repo "$REPO" '.[] | [
+        .number,
+        (.security_advisory.identifiers[] | select(.type == "CVE") | .value),
+        .html_url,
+        $repo
+    ] | @csv' >> "$OUTPUT_CSV"
+  fi
+done
+
+echo "Dependabot alerts have been written to $OUTPUT_CSV"
