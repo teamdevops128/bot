@@ -1,0 +1,90 @@
+#!/bin/bash
+
+ORG_NAME="nj"
+TOKEN="your_github_token"  # Replace this with your GitHub token
+
+# Output CSV file
+OUTPUT_CSV="dependabot_alerts.csv"
+
+# Check if jq is installed
+if ! command -v jq &> /dev/null
+then
+    echo "jq could not be found, please install jq to continue."
+    exit 1
+fi
+
+# Initialize the CSV file with the header
+echo "number,CVE_ID,url,repo_name,severity" > "$OUTPUT_CSV"
+
+# Function to fetch data from the GitHub API
+fetch_data() {
+  local url=$1
+  curl -s -H "Authorization: token $TOKEN" -H "Accept: application/vnd.github+json" "$url"
+}
+
+# Function to fetch all pages of repository data
+fetch_all_repos() {
+  local page=1
+  local per_page=100
+  local repos=()
+
+  while :; do
+    response=$(fetch_data "https://api.github.com/orgs/${ORG_NAME}/repos?per_page=${per_page}&page=${page}")
+    repo_names=$(echo "$response" | jq -r '.[].name')
+    
+    if [[ -z "$repo_names" ]]; then
+      break
+    fi
+    
+    repos+=($repo_names)
+    ((page++))
+  done
+
+  echo "${repos[@]}"
+}
+
+# Function to fetch all pages of Dependabot alerts
+fetch_all_alerts() {
+  local repo=$1
+  local page=1
+  local per_page=100
+  local alerts=()
+
+  while :; do
+    response=$(fetch_data "https://api.github.com/repos/${ORG_NAME}/${repo}/dependabot/alerts?per_page=${per_page}&page=${page}")
+    alert_data=$(echo "$response" | jq -c '.[]')
+    
+    if [[ -z "$alert_data" ]]; then
+      break
+    fi
+    
+    alerts+=($alert_data)
+    ((page++))
+  done
+
+  echo "${alerts[@]}"
+}
+
+# Fetch the list of repositories from the organization
+REPOS=$(fetch_all_repos)
+
+# Loop through each repository and fetch Dependabot alerts
+for REPO in $REPOS; do
+  ALERTS=$(fetch_all_alerts "$REPO")
+
+  # Check if there are alerts
+  if [[ ${#ALERTS[@]} -gt 0 ]]; then
+    # Extract required data and append to the CSV file
+    for ALERT in "${ALERTS[@]}"; do
+      echo "$ALERT" | jq -r --arg repo "$REPO" '[
+          .number,
+          ((.security_advisory.identifiers[] | select(.type == "CVE") | .value) // "CVE not available"),
+          .html_url,
+          $repo,
+          .security_advisory.severity
+      ] | @csv' >> "$OUTPUT_CSV"
+    done
+  fi
+done
+
+echo "Dependabot alerts have been written to $OUTPUT_CSV"
