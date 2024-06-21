@@ -1,0 +1,19 @@
+trivy image rudravasu2021/${DOCKER_IMAGE_NAME}:${BUILD_NUMBER} --format json -o ${OUTPUT_JSON}
+
+if [ $? -ne 0 ]; then
+    echo "Trivy scan failed."
+    exit 1
+fi
+
+echo "Trivy Scan Results:"
+cat ${OUTPUT_JSON}
+
+# Check for high vulnerabilities
+HIGH_VULNERABILITIES=$(jq '[.Results[].Vulnerabilities[] | select(.Severity == "HIGH")] | length' ${OUTPUT_JSON})
+
+if [ "${HIGH_VULNERABILITIES}" -gt 0 ]; then
+    echo "High vulnerabilities found: ${HIGH_VULNERABILITIES}. Build failed."
+    exit 1
+fi
+
+echo "No high vulnerabilities found."
